@@ -1,0 +1,75 @@
+import requests
+import json
+import time
+
+API_KEY = 'U6M7CL9QUVGODEXVGEYU0O1CR0QPC5LFJK2H16YLV4MUZGJWNXK5CAO29VLG8T72'
+API_URL1 = "https://vulners.com/api/v3/burp/softwareapi/"
+
+def load_software_list(file_path):
+    with open(file_path, 'r') as f:
+        return json.load(f)
+
+def check_vulnerabilities(software, version):
+    headers = {"Content-Type": "application/json", "User-Agent": "Vulners Checker/1.0"}
+    all_vulnerabilities = []
+    page = 0
+    try:
+        while True:
+            data = {
+                "software": software,
+                "version": version,
+                "type": "software",
+                "maxVulnerabilities": 5000,
+                "only_ids": True,
+                "apiKey": API_KEY
+            }
+
+            response = requests.post(API_URL1, headers=headers, json=data, timeout=20)
+            response.raise_for_status()
+
+            data = response.json()
+            #print("Raw API response:", json.dumps(data, indent=2))  # Логирование ответа
+
+            title_cve_pairs = []
+
+            if "data" in data and "search" in data["data"]:
+                for item in data["data"]["search"]:
+                    if "_source" in item:
+                        source = item["_source"]
+
+                        title = source.get("title", "No Title")
+                        cves = source.get("cvelist", [])
+                        for cve in cves:
+                            title_cve_pairs.append((title, cve))
+            print("{:<70} {:<15}".format("Title", "CVE"))
+            print("-" * 85)
+            for title, cve in title_cve_pairs:
+                print("{:<70} {:<15}".format(title, cve))
+            if not data.get("result") == "OK":
+                print("API Error:", data.get("data", {}).get("error", "Unknown error"))
+                break
+            documents = data.get("data", {}).get("documents", [])
+            all_vulnerabilities.extend(documents)
+
+            if len(documents) < 100:
+                break
+            page += 1
+            time.sleep(1.5)
+    except Exception as e:
+        print(f"Critical error: {str(e)}")
+    return all_vulnerabilities
+
+
+def main():
+
+    software_list = load_software_list('json_Final2.txt')
+    results = []
+
+    for entry in software_list:
+        software = entry["Program"]
+        version = entry["version"]
+        print(f"Проверка {software} {version}...")
+
+        data = check_vulnerabilities(software, version)
+if __name__ == "__main__":
+    main()
