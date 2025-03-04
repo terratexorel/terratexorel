@@ -1,110 +1,57 @@
 import requests
 import json
-import os
-
-from time import sleep
-
+import time
 
 API_KEY = 'U6M7CL9QUVGODEXVGEYU0O1CR0QPC5LFJK2H16YLV4MUZGJWNXK5CAO29VLG8T72'
 API_URL = "https://vulners.com/api/v3/search/lucene/"
 
 
-def load_software_list(file_path):
-    """Загрузка JSON с перечнем ПО"""
-    with open(file_path, 'r') as f:
-        return json.load(f)
-
 def check_vulnerabilities(software, version):
-
     headers = {
         "Content-Type": "application/json",
-        "User-Agent": "Mozilla/5.0"
+        "User-Agent": "Vulners Checker/1.0"
     }
     all_vulnerabilities = []
-    page_number = 0
-    max_size = 100  # Максимальное количество результатов на страницу (макс. для API)
-    total_results = None
+    page = 0
 
-    while True:
-        payload = {
-            "apiKey": API_KEY,
-            "query": f'affectedSoftware.name:"{software}" AND affectedSoftware.version:"{version}"',
-            "sort": "published",
-            "size": max_size,  # Количество результатов на страницу
-            "page": page_number,  # Номер страницы
-            "fields": ["id", "title", "description"]
-        }
+    try:
+        while True:
+            payload = {
+                "apiKey": API_KEY,
+                "query": f'affectedSoftware.name:"{software.lower()}" AND affectedSoftware.version:"{version}"',
+                "sort": "published",
+                "size": 100,
+                "page": page,
+                "fields": ["id", "title", "description", "cvss", "affectedSoftware"]
+            }
 
-        response = requests.post(
-            "https://vulners.com/api/v3/search/lucene/",
-            headers=headers,
-            json=payload
-        )
+            response = requests.post(API_URL, headers=headers, json=payload, timeout=20)
+            response.raise_for_status()
 
-        if response.status_code != 200:
-            print(f"Ошибка запроса: {response.status_code}")
-            break
+            data = response.json()
+            print("Raw API response:", json.dumps(data, indent=2))  # Логирование ответа
 
-        data = response.json()
+            if not data.get("result") == "OK":
+                print("API Error:", data.get("data", {}).get("error", "Unknown error"))
+                break
 
-        # Первый запрос: сохраняем общее количество результатов
-        if total_results is None:
-            total_results = data.get("data", {}).get("total", 0)
-            print(f"Найдено уязвимостей: {total_results}")
+            documents = data.get("data", {}).get("documents", [])
+            all_vulnerabilities.extend(documents)
 
-        # Собираем уязвимости
-        current_vulns = data.get("data", {}).get("documents", [])
-        all_vulnerabilities.extend(current_vulns)
+            if len(documents) < 100:
+                break
 
-        # Проверяем, есть ли еще страницы
-        if len(current_vulns) < max_size:
-            break  # Все результаты получены
-        else:
-            page_number += 1
-            time.sleep(1)  # Задержка для соблюдения лимитов API
+            page += 1
+            time.sleep(1.5)
+
+    except Exception as e:
+        print(f"Critical error: {str(e)}")
 
     return all_vulnerabilities
 
 
-
-def generate_report(results):
-    """Генерация отчета"""
-    report = []
-    for item in results:
-        report.append(f"\nПрограмма: {item['program']} {item['version']}")
-        if item['vulns']:
-            for vuln in item['vulns'][:10]:  # Показать топ-3 уязвимости
-                report.append(f"  - {vuln['id']} (CVSS3: {vuln.get('score', 'N/A')})")
-                report.append(f"    Описание: {vuln['description'][:1000]}...")
-        else:
-            report.append("  Уязвимостей не найдено")
-    return "\n".join(report)
-
-
-def main():
-
-    software_list = load_software_list('json_Final2.txt')
-    results = []
-
-    for entry in software_list:
-        software = entry["Program"]
-        version = entry["version"]
-        print(f"Проверка {software} {version}...")
-
-        data = check_vulnerabilities(software, version)
-
-        if data and 'data' in data:
-            vulns = data['data'].get('documents', [])
-            results.append({
-                "program": software,
-                "version": version,
-                "vulns": vulns
-            })
-        sleep(1)  # Ограничение запросов
-
-    print("\nОтчет об уязвимостях:")
-    print(generate_report(results))
-
-
-if __name__ == "__main__":
-    main()
+# Пример использования
+libreoffice_vulns = check_vulnerabilities("libreoffice", "6.0.7")
+print(f"Found {len(libreoffice_vulns)} vulnerabilities")
+for vuln in libreoffice_vulns:
+    print(f"- {vuln['id']} ({vuln.get('title', 'No title')})")
